@@ -1,4 +1,6 @@
 #include "../../include/gui.h"
+#include "../../include/sequence.h"
+
 #include <proto/exec.h>
 #include <proto/muimaster.h>
 #include <proto/intuition.h>
@@ -9,33 +11,94 @@ struct GfxBase *GfxBase;
 struct IntuitionBase *IntuitionBase;
 struct Library *MUIMasterBase;
 
-VOID __saveds SetMode(struct Hook *hook, Object *obj, ULONG mode);
 
-// Hook declarations
-static struct Hook SetModeHook = { { NULL, NULL }, (VOID *)SetMode, NULL, NULL };
-
-// Hook implementations
-VOID __saveds SetMode(struct Hook *hook, Object *obj, ULONG mode)
+void UpdateSequenceDisplay(struct GUIState *state)
 {
-    struct GUIState *state = (struct GUIState *)hook->h_Data;
-    state->currentMode = mode;
+    char buffer[50];
+    sprintf(buffer, "Sequence %d/16", state->song.currentSequence + 1);
+    SetMessage2(state, buffer);
     
-    // Update message based on mode
-    switch(mode) {
-        case MODE_LOAD:
-            SetMessage1(state, "Load Mode: Select pad to load sample");
+    // Update sequence text
+    if (state->sequenceText) {
+        set(state->sequenceText, MUIA_Text_Contents, buffer);
+    }
+}
+
+// Add to HandleButtonPress:
+void HandleButtonPress(struct GUIState *state, ULONG id)
+{
+    char buffer[100];
+    if (id >= ID_PAD_BASE && id < ID_PAD_BASE + 16) {
+        ULONG padNum = id - ID_PAD_BASE;
+        sprintf(buffer, "Pad %ld pressed", padNum + 1);
+        SetMessage1(state, buffer);
+        return;
+    }
+    switch(id) {
+        case ID_PREV_SEQUENCE:
+            if (state->song.currentSequence > 0) {
+                state->song.currentSequence--;
+                UpdateSequenceDisplay(state);
+            }
             break;
-        case MODE_SEQUENCE:
+
+        case ID_NEXT_SEQUENCE:
+            if (state->song.currentSequence < MAX_SEQUENCES - 1) {
+                state->song.currentSequence++;
+                UpdateSequenceDisplay(state);
+            }
+            break;
+
+        case 2:  // Sequence
+            state->currentMode = MODE_SEQUENCE;
             SetMessage1(state, "Sequence Mode: Press pads to trigger samples");
             break;
-        case MODE_EDIT:
+
+        case 3:  // Edit
+            state->currentMode = MODE_EDIT;
             SetMessage1(state, "Edit Mode: Select step then pad to assign");
             break;
-        case MODE_PITCH:
+
+        case 4:  // Pitch
+            state->currentMode = MODE_PITCH;
             SetMessage1(state, "Pitch Mode: Select step then set pitch");
+            break;
+
+        case 5:  // Play
+            SetMessage1(state, "Playing sequence...");
+            break;
+
+        case 6:  // Stop
+            SetMessage1(state, "Stopped");
+            break;
+
+
+        case MODE_SEQUENCE:
+            state->currentMode = MODE_SEQUENCE;
+            SetMessage1(state, "Sequence Mode: Press pads 1-16 to select sequence");
+            break;
+
+        // ... handle pad presses for sequence selection ...
+        default:
+            if (id >= ID_PAD_BASE && id < ID_PAD_BASE + 16) {
+                ULONG padNum = id - ID_PAD_BASE;
+                
+                if (state->currentMode == MODE_SEQUENCE) {
+                    // Use pad to select sequence
+                    state->song.currentSequence = padNum;
+                    UpdateSequenceDisplay(state);
+                    sprintf(buffer, "Selected sequence %ld", padNum + 1);
+                    SetMessage1(state, buffer);
+                } else {
+                    // Normal pad handling
+                    sprintf(buffer, "Pad %ld pressed", padNum + 1);
+                    SetMessage1(state, buffer);
+                }
+            }
             break;
     }
 }
+
 
 static BOOL InitLibs(void)
 {
@@ -240,56 +303,16 @@ void HandlePadPress(struct GUIState *state, ULONG padID)
         }
     }
 }
-void HandleButtonPress(struct GUIState *state, ULONG id)
-{
-    char buffer[100];
-
-    // Check if it's a pad press
-    if (id >= ID_PAD_BASE && id < ID_PAD_BASE + 16) {
-        ULONG padNum = id - ID_PAD_BASE;
-        sprintf(buffer, "Pad %ld pressed", padNum + 1);
-        SetMessage1(state, buffer);
-        return;
-    }
-
-    // Handle other buttons
-    switch(id) {
-        case 1:  // Load
-            state->currentMode = MODE_LOAD;
-            SetMessage1(state, "Load Mode: Select pad to load sample");
-            break;
-
-        case 2:  // Sequence
-            state->currentMode = MODE_SEQUENCE;
-            SetMessage1(state, "Sequence Mode: Press pads to trigger samples");
-            break;
-
-        case 3:  // Edit
-            state->currentMode = MODE_EDIT;
-            SetMessage1(state, "Edit Mode: Select step then pad to assign");
-            break;
-
-        case 4:  // Pitch
-            state->currentMode = MODE_PITCH;
-            SetMessage1(state, "Pitch Mode: Select step then set pitch");
-            break;
-
-        case 5:  // Play
-            SetMessage1(state, "Playing sequence...");
-            break;
-
-        case 6:  // Stop
-            SetMessage1(state, "Stopped");
-            break;
-    }
-}
 
 
 BOOL InitGUI(struct GUIState *state)
 {
 
     memset(state, 0, sizeof(struct GUIState));
-    
+
+    // Initialize song data
+    InitSong(&state->song);
+
     // Set initial values
     state->currentMode = MODE_SEQUENCE;
     state->selectedTrack = -1;
@@ -383,17 +406,47 @@ BOOL InitGUI(struct GUIState *state)
             MUIA_Text_Contents, "",
             MUIA_Text_PreParse, "\33c",
         End,
-
-                // Sequence tracks
-    Child, VGroup,
-        MUIA_Frame, MUIV_Frame_Group,
-        MUIA_Background, MUII_GroupBack,
-        
-        Child, state->trackGroups[0] = CreateTrackGroup(state, 0),
-        Child, state->trackGroups[1] = CreateTrackGroup(state, 1),
-        Child, state->trackGroups[2] = CreateTrackGroup(state, 2),
-        Child, state->trackGroups[3] = CreateTrackGroup(state, 3),
-    End,
+        // Sequence tracks
+        Child, VGroup,
+            MUIA_Frame, MUIV_Frame_Group,
+            MUIA_Background, MUII_GroupBack,
+            
+            Child, state->trackGroups[0] = CreateTrackGroup(state, 0),
+            Child, state->trackGroups[1] = CreateTrackGroup(state, 1),
+            Child, state->trackGroups[2] = CreateTrackGroup(state, 2),
+            Child, state->trackGroups[3] = CreateTrackGroup(state, 3),
+        End,
+        // Sequence navigation
+        Child, HGroup,
+            Child, RectangleObject,
+                MUIA_Weight, 100,    // Give most weight to this space to push content right
+            End,
+            Child, state->sequencePrevButton = TextObject, ButtonFrame,
+                MUIA_Background, MUII_ButtonBack,
+                MUIA_Text_Contents, "<",
+                MUIA_Text_PreParse, "\33c",
+                MUIA_InputMode, MUIV_InputMode_RelVerify,
+                MUIA_FixWidth, 20,
+                MUIA_Weight, 0,      // No expansion
+            End,
+            Child, state->sequenceText = TextObject,
+                MUIA_Text_PreParse, "\33c",
+                MUIA_Text_Contents, "Sequence 1/16",
+                MUIA_Frame, MUIV_Frame_Text,
+                MUIA_Weight, 0,      // No expansion
+            End,
+            Child, state->sequenceNextButton = TextObject, ButtonFrame,
+                MUIA_Background, MUII_ButtonBack,
+                MUIA_Text_Contents, ">",
+                MUIA_Text_PreParse, "\33c",
+                MUIA_InputMode, MUIV_InputMode_RelVerify,
+                MUIA_FixWidth, 20,
+                MUIA_Weight, 0,      // No expansion
+            End,
+            Child, RectangleObject,
+                MUIA_Weight, 1,      // Small right margin
+            End,
+        End,
 
             Child, VGroup,
                 GroupFrameT("Sample Pads"),
@@ -462,6 +515,11 @@ BOOL InitGUI(struct GUIState *state)
             
     DoMethod(state->stopButton, MUIM_Notify, MUIA_Pressed, FALSE,
             state->app, 2, MUIM_Application_ReturnID, 6);
+    DoMethod(state->sequencePrevButton, MUIM_Notify, MUIA_Pressed, FALSE,
+            state->app, 2, MUIM_Application_ReturnID, ID_PREV_SEQUENCE);
+            
+    DoMethod(state->sequenceNextButton, MUIM_Notify, MUIA_Pressed, FALSE,
+            state->app, 2, MUIM_Application_ReturnID, ID_NEXT_SEQUENCE);
 
     // For each pad button:
     for (int i = 0; i < 16; i++) {

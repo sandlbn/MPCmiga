@@ -8,9 +8,12 @@
 #include <proto/graphics.h>
 #include <proto/exec.h>
 #include <clib/alib_protos.h>
-
-#define ID_PAD_BASE 100  // Base ID for pads
+#include "sequence.h" 
 #define MAKE_ID(a,b,c,d) ((ULONG) (a)<<24 | (ULONG) (b)<<16 | (ULONG) (c)<<8 | (ULONG) (d))
+
+#define ID_PAD_BASE     100
+#define ID_PREV_SEQUENCE 200
+#define ID_NEXT_SEQUENCE 201
 
 // Mode definitions
 enum {
@@ -37,14 +40,15 @@ struct GUIState {
     Object *sequenceTracks[4 * 32];  // 4 tracks × 32 steps
     Object *samplePads[16];
     Object *trackGroups[4];  // Store track group objects
-    
-    // Added state tracking
+    Object *sequencePrevButton;
+    Object *sequenceNextButton;
+    Object *sequenceText;
     ULONG currentMode;
     LONG selectedTrack;    // -1 means none selected
     LONG selectedStep;     // -1 means none selected
     BOOL isPlaying;
+    struct Song song;      // Now the compiler knows what struct Song is
 };
-
 struct StepMarker {
     int step;
     char *label;
@@ -72,6 +76,8 @@ void SetMessage1(struct GUIState *state, const char *text);
 void SetMessage2(struct GUIState *state, const char *text);
 void HandlePadPress(struct GUIState *state, ULONG padID);
 void HandleButtonPress(struct GUIState *state, ULONG id);
+void UpdateSequenceDisplay(struct GUIState *state);
+
 
 // Helper macros
 #define XGET(obj,attr) ({ \

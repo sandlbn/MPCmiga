@@ -17,11 +17,14 @@ PROGRAM_NAME = AmigaSampler
 
 # Source files
 SOURCES = $(SRCDIR)/main.c \
-          $(SRCDIR)/gui/gui.c 
+          $(SRCDIR)/gui/gui.c \
+          $(SRCDIR)/sequence/sequence.c
 
 # Object files
 OBJECTS = $(BUILDDIR)/main.o \
-          $(BUILDDIR)/gui/gui.o 
+          $(BUILDDIR)/gui/gui.o \
+          $(BUILDDIR)/sequence/sequence.o
+
 
 # Compiler flags
 BASE_CCFLAGS = -MP -MMD -Wextra -Wno-unused-function \
@@ -57,6 +60,7 @@ release:
 
 dirs:
 	@mkdir -p $(BUILDDIR)/gui
+	@mkdir -p $(BUILDDIR)/sequence
 	@mkdir -p $(OUTDIR)
 
 $(OUTDIR)/$(PROGRAM_NAME): $(OBJECTS)
