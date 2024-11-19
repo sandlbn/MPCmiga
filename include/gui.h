@@ -14,6 +14,9 @@
 #define ID_PAD_BASE     100
 #define ID_PREV_SEQUENCE 200
 #define ID_NEXT_SEQUENCE 201
+#define ID_STEP_BASE 300
+#define ID_STEP_END (ID_STEP_BASE + (TRACKS_PER_SEQUENCE * STEPS_PER_TRACK))
+
 
 // Mode definitions
 enum {

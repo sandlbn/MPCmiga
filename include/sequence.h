@@ -13,8 +13,8 @@ struct Step {
     UBYTE velocity;    // Note velocity (0-127)
     UBYTE volume;      // Note volume (0-127)
     BOOL active;       // Whether this step is active
+    UBYTE sample;      // Which sample is assigned (0-15) - Adding this new field
 };
-
 // Structure for a single track
 struct Track {
     struct Step steps[STEPS_PER_TRACK];
@@ -40,9 +40,8 @@ struct Song {
 
 // Function prototypes
 void InitSong(struct Song *song);
-void SetStep(struct Song *song, UBYTE seqNum, UBYTE trackNum, UBYTE stepNum, 
-             UBYTE note, UBYTE velocity, UBYTE volume);
 void ClearStep(struct Song *song, UBYTE seqNum, UBYTE trackNum, UBYTE stepNum);
 void SetSequence(struct Song *song, UBYTE seqNum);
+void SetStep(struct Song *song, UBYTE seqNum, UBYTE trackNum, UBYTE stepNum, UBYTE note, UBYTE velocity, UBYTE volume, UBYTE sample);
 
 #endif

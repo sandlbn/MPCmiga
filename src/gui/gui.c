@@ -24,21 +24,246 @@ void UpdateSequenceDisplay(struct GUIState *state)
     }
 }
 
+void UpdateSequenceButtons(struct GUIState *state)
+{
+    struct Sequence *seq = &state->song.sequences[state->song.currentSequence];
+    
+    for (int track = 0; track < TRACKS_PER_SEQUENCE; track++) {
+        for (int step = 0; step < STEPS_PER_TRACK; step++) {
+            ULONG stepId = (track * STEPS_PER_TRACK) + step;
+            struct Step *stepData = &seq->tracks[track].steps[step];
+            Object *button = state->sequenceTracks[stepId];
+            
+            if (button) {
+                char displayText[4] = "-";
+                ULONG background = MUII_ButtonBack;
+                
+                if (stepData->active) {
+                    background = MUII_FILL;
+                    if (state->currentMode == MODE_PITCH) {
+                        // Show note number (0-15 for simplicity)
+                        sprintf(displayText, "%2d", stepData->note - 36);
+                    } else {
+                        // Show sample number
+                        sprintf(displayText, "S%d", stepData->sample + 1);
+                    }
+                }
+                
+                // Highlight selected step
+                if (state->selectedTrack == track && state->selectedStep == step) {
+                    background = MUII_FILLSHINE;  // Use different color for selected step
+                }
+                
+                set(button, MUIA_Background, background);
+                set(button, MUIA_Text_Contents, displayText);
+            }
+        }
+    }
+}
+void HandleStepButton(struct GUIState *state, ULONG stepId)
+{
+    UBYTE trackNum = stepId / STEPS_PER_TRACK;
+    UBYTE stepNum = stepId % STEPS_PER_TRACK;
+    struct Step *step = &state->song.sequences[state->song.currentSequence]
+                        .tracks[trackNum].steps[stepNum];
+    
+    switch(state->currentMode) {
+        case MODE_SEQUENCE:
+            // Toggle step on/off
+            step->active = !step->active;
+            // Clear note data if deactivating
+            if (!step->active) {
+                step->note = 0;
+                step->velocity = 0;
+                step->sample = 0;
+            }
+            break;
+            
+        case MODE_EDIT:
+            state->selectedTrack = trackNum;
+            state->selectedStep = stepNum;
+            break;
+            
+        case MODE_PITCH:
+            state->selectedTrack = trackNum;
+            state->selectedStep = stepNum;
+            break;
+    }
+    
+    UpdateSequenceButtons(state);
+}
+
+
+void HandlePadButton(struct GUIState *state, ULONG padNum)
+{
+    char buffer[100];
+    struct Step *step = NULL;
+    
+    if (state->selectedTrack >= 0 && state->selectedStep >= 0) {
+        step = &state->song.sequences[state->song.currentSequence]
+                .tracks[state->selectedTrack]
+                .steps[state->selectedStep];
+    }
+    
+    switch(state->currentMode) {
+        case MODE_SEQUENCE:
+            // Use pad to select sequence
+            if (padNum < MAX_SEQUENCES) {
+                state->song.currentSequence = padNum;
+                UpdateSequenceDisplay(state);
+                sprintf(buffer, "Selected sequence %ld", padNum + 1);
+                SetMessage1(state, buffer);
+                UpdateSequenceButtons(state);
+            }
+            break;
+            
+        case MODE_EDIT:
+            if (step) {
+                step->active = TRUE;
+                step->sample = padNum;
+                step->velocity = 100;  // Default velocity
+                step->note = 36 + padNum;  // MIDI note starting at C2
+                sprintf(buffer, "Assigned pad %ld to track %d step %d",
+                        padNum + 1, state->selectedTrack + 1, state->selectedStep + 1);
+                SetMessage1(state, buffer);
+                UpdateSequenceButtons(state);
+                // Clear selection after assignment
+                state->selectedTrack = -1;
+                state->selectedStep = -1;
+            }
+            break;
+            
+        case MODE_PITCH:
+            if (step) {
+                step->note = 36 + padNum;  // MIDI note starting at C2
+                sprintf(buffer, "Set pitch %d for track %d step %d",
+                        step->note, state->selectedTrack + 1, state->selectedStep + 1);
+                SetMessage1(state, buffer);
+                UpdateSequenceButtons(state);
+                // Clear selection after assignment
+                state->selectedTrack = -1;
+                state->selectedStep = -1;
+            }
+            break;
+    }
+}
 // Add to HandleButtonPress:
 void HandleButtonPress(struct GUIState *state, ULONG id)
 {
     char buffer[100];
-    if (id >= ID_PAD_BASE && id < ID_PAD_BASE + 16) {
-        ULONG padNum = id - ID_PAD_BASE;
-        sprintf(buffer, "Pad %ld pressed", padNum + 1);
-        SetMessage1(state, buffer);
+
+    // Handle step buttons
+    if (id >= ID_STEP_BASE && id < ID_STEP_BASE + (TRACKS_PER_SEQUENCE * STEPS_PER_TRACK)) {
+        ULONG stepId = id - ID_STEP_BASE;
+        UBYTE trackNum = stepId / STEPS_PER_TRACK;
+        UBYTE stepNum = stepId % STEPS_PER_TRACK;
+        
+        switch(state->currentMode) {
+            case MODE_SEQUENCE:
+                // Toggle step on/off
+                {
+                    struct Step *step = &state->song.sequences[state->song.currentSequence]
+                                       .tracks[trackNum].steps[stepNum];
+                    step->active = !step->active;
+                    if (!step->active) {
+                        step->note = 0;
+                        step->velocity = 0;
+                        step->volume = 0;
+                        step->sample = 0;
+                    }
+                    sprintf(buffer, "Track %d Step %d %s", 
+                            trackNum + 1, stepNum + 1, 
+                            step->active ? "activated" : "deactivated");
+                    SetMessage1(state, buffer);
+                }
+                break;
+
+            case MODE_EDIT:
+                // Select step for editing
+                state->selectedTrack = trackNum;
+                state->selectedStep = stepNum;
+                sprintf(buffer, "Ready to assign pad to Track %d Step %d", 
+                        trackNum + 1, stepNum + 1);
+                SetMessage1(state, buffer);
+                break;
+
+            case MODE_PITCH:
+                // Select step for pitch editing
+                state->selectedTrack = trackNum;
+                state->selectedStep = stepNum;
+                sprintf(buffer, "Ready to set pitch for Track %d Step %d", 
+                        trackNum + 1, stepNum + 1);
+                SetMessage1(state, buffer);
+                break;
+        }
+        UpdateSequenceButtons(state);
         return;
     }
+
+    // Handle pad buttons
+    if (id >= ID_PAD_BASE && id < ID_PAD_BASE + 16) {
+        ULONG padNum = id - ID_PAD_BASE;
+        
+        switch(state->currentMode) {
+            case MODE_SEQUENCE:
+                if (padNum < MAX_SEQUENCES) {
+                    state->song.currentSequence = padNum;
+                    UpdateSequenceDisplay(state);
+                    sprintf(buffer, "Selected sequence %ld", padNum + 1);
+                    SetMessage1(state, buffer);
+                    UpdateSequenceButtons(state);
+                }
+                break;
+                
+            case MODE_EDIT:
+                if (state->selectedTrack >= 0 && state->selectedStep >= 0) {
+                    struct Step *step = &state->song.sequences[state->song.currentSequence]
+                                       .tracks[state->selectedTrack]
+                                       .steps[state->selectedStep];
+                    step->active = TRUE;
+                    step->sample = padNum;
+                    step->velocity = 100;
+                    step->note = 36 + padNum;
+                    sprintf(buffer, "Assigned pad %ld to track %d step %d",
+                            padNum + 1, state->selectedTrack + 1, state->selectedStep + 1);
+                    SetMessage1(state, buffer);
+                    UpdateSequenceButtons(state);
+                    state->selectedTrack = -1;  // Clear selection
+                    state->selectedStep = -1;
+                } else {
+                    sprintf(buffer, "Select a step first before assigning pad %ld", padNum + 1);
+                    SetMessage1(state, buffer);
+                }
+                break;
+                
+            case MODE_PITCH:
+                if (state->selectedTrack >= 0 && state->selectedStep >= 0) {
+                    struct Step *step = &state->song.sequences[state->song.currentSequence]
+                                       .tracks[state->selectedTrack]
+                                       .steps[state->selectedStep];
+                    step->note = 36 + padNum;
+                    sprintf(buffer, "Set pitch %d for track %d step %d",
+                            step->note, state->selectedTrack + 1, state->selectedStep + 1);
+                    SetMessage1(state, buffer);
+                    UpdateSequenceButtons(state);
+                    state->selectedTrack = -1;  // Clear selection
+                    state->selectedStep = -1;
+                } else {
+                    sprintf(buffer, "Select a step first before setting pitch with pad %ld", padNum + 1);
+                    SetMessage1(state, buffer);
+                }
+                break;
+        }
+        return;
+    }
+
+    // Handle other buttons
     switch(id) {
         case ID_PREV_SEQUENCE:
             if (state->song.currentSequence > 0) {
                 state->song.currentSequence--;
                 UpdateSequenceDisplay(state);
+                UpdateSequenceButtons(state);
             }
             break;
 
@@ -46,23 +271,36 @@ void HandleButtonPress(struct GUIState *state, ULONG id)
             if (state->song.currentSequence < MAX_SEQUENCES - 1) {
                 state->song.currentSequence++;
                 UpdateSequenceDisplay(state);
+                UpdateSequenceButtons(state);
             }
+            break;
+
+        case 1:  // Load
+            state->currentMode = MODE_LOAD;
+            SetMessage1(state, "Load Mode: Select pad to load sample");
             break;
 
         case 2:  // Sequence
             state->currentMode = MODE_SEQUENCE;
+            state->selectedTrack = -1;
+            state->selectedStep = -1;
             SetMessage1(state, "Sequence Mode: Press pads to trigger samples");
             break;
 
         case 3:  // Edit
             state->currentMode = MODE_EDIT;
+            state->selectedTrack = -1;
+            state->selectedStep = -1;
             SetMessage1(state, "Edit Mode: Select step then pad to assign");
             break;
 
         case 4:  // Pitch
             state->currentMode = MODE_PITCH;
+            state->selectedTrack = -1;
+            state->selectedStep = -1;
             SetMessage1(state, "Pitch Mode: Select step then set pitch");
             break;
+
 
         case 5:  // Play
             SetMessage1(state, "Playing sequence...");
@@ -71,34 +309,8 @@ void HandleButtonPress(struct GUIState *state, ULONG id)
         case 6:  // Stop
             SetMessage1(state, "Stopped");
             break;
-
-
-        case MODE_SEQUENCE:
-            state->currentMode = MODE_SEQUENCE;
-            SetMessage1(state, "Sequence Mode: Press pads 1-16 to select sequence");
-            break;
-
-        // ... handle pad presses for sequence selection ...
-        default:
-            if (id >= ID_PAD_BASE && id < ID_PAD_BASE + 16) {
-                ULONG padNum = id - ID_PAD_BASE;
-                
-                if (state->currentMode == MODE_SEQUENCE) {
-                    // Use pad to select sequence
-                    state->song.currentSequence = padNum;
-                    UpdateSequenceDisplay(state);
-                    sprintf(buffer, "Selected sequence %ld", padNum + 1);
-                    SetMessage1(state, buffer);
-                } else {
-                    // Normal pad handling
-                    sprintf(buffer, "Pad %ld pressed", padNum + 1);
-                    SetMessage1(state, buffer);
-                }
-            }
-            break;
     }
 }
-
 
 static BOOL InitLibs(void)
 {
@@ -144,45 +356,30 @@ static Object *CreateTrackGroup(struct GUIState *state, int trackNum)
 
     if (group) {
         // Add step buttons
-        for (int i = 0; i < 32; i++) {
-            const struct StepMarker *marker = GetStepMarker(i);
-            char preparse[10] = "\33c";  // Default center alignment
+        for (int i = 0; i < STEPS_PER_TRACK; i++) {
+            ULONG stepID = ID_STEP_BASE + (trackNum * STEPS_PER_TRACK) + i;
             
-            if (marker) {
-                if (marker->isBold) {
-                    strcat(preparse, "\33b");  // Add bold for important markers
-                }
-                
-                state->sequenceTracks[trackNum * 32 + i] = TextObject, ButtonFrame,
-                    MUIA_Background, MUII_ButtonBack,
-                    MUIA_Text_Contents, marker->label,
-                    MUIA_Text_PreParse, preparse,
-                    MUIA_InputMode, MUIV_InputMode_RelVerify,
-                    MUIA_Text_PreParse, "\33c",
-                    MUIA_FixWidth, 12,
-                    MUIA_FixHeight, 8,
-                    MUIA_Weight, 0,
-                    MUIA_Frame, MUIV_Frame_Button,
-                End;
-            } else {
-                // Regular step button
-                state->sequenceTracks[trackNum * 32 + i] = TextObject, ButtonFrame,
-                    MUIA_Background, MUII_ButtonBack,
-                    MUIA_Text_Contents, "-",
-                    MUIA_Text_PreParse, "\33c",
-                    MUIA_InputMode, MUIV_InputMode_RelVerify,
-                    MUIA_FixWidth, 12,
-                    MUIA_FixHeight, 8,
-                    MUIA_Weight, 0,
-                    MUIA_Frame, MUIV_Frame_Button,
-                End;
-            }
+            state->sequenceTracks[trackNum * STEPS_PER_TRACK + i] = TextObject, ButtonFrame,
+                MUIA_Background, MUII_ButtonBack,
+                MUIA_Text_Contents, "-",
+                MUIA_Text_PreParse, "\33c",
+                MUIA_InputMode, MUIV_InputMode_RelVerify,
+                MUIA_FixWidth, 12,
+                MUIA_FixHeight, 8,
+                MUIA_Weight, 0,
+                MUIA_Frame, MUIV_Frame_Button,
+            End;
 
-            if (state->sequenceTracks[trackNum * 32 + i]) {
-                DoMethod(group, OM_ADDMEMBER, state->sequenceTracks[trackNum * 32 + i]);
+            if (state->sequenceTracks[trackNum * STEPS_PER_TRACK + i]) {
+                DoMethod(group, OM_ADDMEMBER, state->sequenceTracks[trackNum * STEPS_PER_TRACK + i]);
+                
+                // Add notification for the button press
+                DoMethod(state->sequenceTracks[trackNum * STEPS_PER_TRACK + i], 
+                    MUIM_Notify, MUIA_Pressed, FALSE,
+                    state->app, 2, 
+                    MUIM_Application_ReturnID, stepID);
             }
         }
-
         // Add M/S buttons
         Object *muteButton = TextObject, ButtonFrame,
             MUIA_Background, MUII_ButtonBack,
@@ -515,6 +712,19 @@ BOOL InitGUI(struct GUIState *state)
             
     DoMethod(state->stopButton, MUIM_Notify, MUIA_Pressed, FALSE,
             state->app, 2, MUIM_Application_ReturnID, 6);
+
+    // Add step button notifications
+    for (int track = 0; track < TRACKS_PER_SEQUENCE; track++) {
+        for (int step = 0; step < STEPS_PER_TRACK; step++) {
+            if (state->sequenceTracks[track * STEPS_PER_TRACK + step]) {
+                DoMethod(state->sequenceTracks[track * STEPS_PER_TRACK + step],
+                    MUIM_Notify, MUIA_Selected, MUIV_EveryTime,
+                    state->app, 2,
+                    MUIM_Application_ReturnID, ID_STEP_BASE + (track * STEPS_PER_TRACK) + step);
+            }
+        }
+    }
+
     DoMethod(state->sequencePrevButton, MUIM_Notify, MUIA_Pressed, FALSE,
             state->app, 2, MUIM_Application_ReturnID, ID_PREV_SEQUENCE);
             
